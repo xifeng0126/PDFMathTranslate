@@ -258,8 +258,8 @@ def translate_file(
 
     filename = os.path.splitext(os.path.basename(file_path))[0]
     file_raw = output / f"{filename}.pdf"
-    file_mono = output / f"{filename}-译文.pdf"
-    file_dual = output / f"{filename}-双语.pdf"
+    file_mono = output / f"{filename}-mono.pdf"
+    file_dual = output / f"{filename}-dual.pdf"
 
     translator = service_map[service]
     if page_range != "自定义":

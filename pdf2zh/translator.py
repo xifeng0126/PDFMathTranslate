@@ -32,14 +32,6 @@ from tenacity import wait_exponential
 
 logger = logging.getLogger(__name__)
 
-try:
-    import argostranslate.package
-    import argostranslate.translate
-except ImportError:
-    logger.warning(
-        "argos-translate is not installed, if you want to use argostranslate, please install it. If you don't use argostranslate translator, you can safely ignore this warning."
-    )
-
 
 def remove_control_characters(s):
     return "".join(ch for ch in s if unicodedata.category(ch)[0] != "C")
