@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 from babeldoc.docvision.doclayout import OnnxModel
 
 BABELDOC_MODEL = OnnxModel.load_available()
-# The following variables associate strings with translators
+# 翻译服务映射
 service_map: dict[str, BaseTranslator] = {
     "Google": GoogleTranslator,
     "Bing": BingTranslator,
@@ -72,49 +72,48 @@ service_map: dict[str, BaseTranslator] = {
     "Groq": GroqTranslator,
     "DeepSeek": DeepseekTranslator,
     "OpenAI-liked": OpenAIlikedTranslator,
-    "Ali Qwen-Translation": QwenMtTranslator,
+    "Ali Qwen-翻译": QwenMtTranslator,
 }
 
-# The following variables associate strings with specific languages
+# 语言映射
 lang_map = {
-    "Simplified Chinese": "zh",
-    "Traditional Chinese": "zh-TW",
-    "English": "en",
-    "French": "fr",
-    "German": "de",
-    "Japanese": "ja",
-    "Korean": "ko",
-    "Russian": "ru",
-    "Spanish": "es",
-    "Italian": "it",
+    "简体中文": "zh",
+    "繁体中文": "zh-TW",
+    "英文": "en",
+    "法文": "fr",
+    "德文": "de",
+    "日文": "ja",
+    "韩文": "ko",
+    "俄文": "ru",
+    "西班牙文": "es",
+    "意大利文": "it",
 }
 
-# The following variable associate strings with page ranges
+# 页面范围映射
 page_map = {
-    "All": None,
-    "First": [0],
-    "First 5 pages": list(range(0, 5)),
-    "Others": None,
+    "全部": None,
+    "第1页": [0],
+    "前5页": list(range(0, 5)),
+    "自定义(eg.1-3)": None,
 }
 
-# Check if this is a public demo, which has resource limits
+# 检查是否为公开演示版
 flag_demo = False
 
-# Limit resources
+# 资源限制
 if ConfigManager.get("PDF2ZH_DEMO"):
     flag_demo = True
     service_map = {
         "Google": GoogleTranslator,
     }
     page_map = {
-        "First": [0],
-        "First 20 pages": list(range(0, 20)),
+        "第一页": [0],
+        "前20页": list(range(0, 20)),
     }
     client_key = ConfigManager.get("PDF2ZH_CLIENT_KEY")
     server_key = ConfigManager.get("PDF2ZH_SERVER_KEY")
 
-
-# Limit Enabled Services
+# 启用服务限制
 enabled_services: T.Optional[T.List[str]] = ConfigManager.get("ENABLED_SERVICES")
 if isinstance(enabled_services, list):
     default_services = ["Google", "Bing"]
@@ -125,75 +124,70 @@ if isinstance(enabled_services, list):
         if str(k).lower().strip() in enabled_services_names
     ]
     if len(enabled_services) == 0:
-        raise RuntimeError(f"No services available.")
+        raise RuntimeError(f"没有可用的翻译服务")
     enabled_services = default_services + enabled_services
 else:
     enabled_services = list(service_map.keys())
 
-
-# Configure about Gradio show keys
+# Gradio显示配置
 hidden_gradio_details: bool = bool(ConfigManager.get("HIDDEN_GRADIO_DETAILS"))
 
-
-# Public demo control
+# 公开演示控制
 def verify_recaptcha(response):
     """
-    This function verifies the reCAPTCHA response.
+    验证reCAPTCHA响应
     """
     recaptcha_url = "https://www.google.com/recaptcha/api/siteverify"
     data = {"secret": server_key, "response": response}
     result = requests.post(recaptcha_url, data=data).json()
     return result.get("success")
 
-
 def download_with_limit(url: str, save_path: str, size_limit: int) -> str:
     """
-    This function downloads a file from a URL and saves it to a specified path.
+    从URL下载文件并保存到指定路径
 
-    Inputs:
-        - url: The URL to download the file from
-        - save_path: The path to save the file to
-        - size_limit: The maximum size of the file to download
+    输入:
+        - url: 文件下载URL
+        - save_path: 文件保存路径
+        - size_limit: 文件大小限制
 
-    Returns:
-        - The path of the downloaded file
+    返回:
+        - 下载文件的路径
     """
     chunk_size = 1024
     total_size = 0
     with requests.get(url, stream=True, timeout=10) as response:
         response.raise_for_status()
         content = response.headers.get("Content-Disposition")
-        try:  # filename from header
+        try:  # 从header获取文件名
             _, params = cgi.parse_header(content)
             filename = params["filename"]
-        except Exception:  # filename from url
+        except Exception:  # 从URL获取文件名
             filename = os.path.basename(url)
         filename = os.path.splitext(os.path.basename(filename))[0] + ".pdf"
         with open(save_path / filename, "wb") as file:
             for chunk in response.iter_content(chunk_size=chunk_size):
                 total_size += len(chunk)
                 if size_limit and total_size > size_limit:
-                    raise gr.Error("Exceeds file size limit")
+                    raise gr.Error("超过文件大小限制")
                 file.write(chunk)
     return save_path / filename
 
-
 def stop_translate_file(state: dict) -> None:
     """
-    This function stops the translation process.
+    停止翻译过程
 
-    Inputs:
-        - state: The state of the translation process
+    输入:
+        - state: 翻译过程状态
 
-    Returns:- None
+    返回: 无
     """
     session_id = state["session_id"]
     if session_id is None:
         return
     if session_id in cancellation_event_map:
-        logger.info(f"Stopping translation for session {session_id}")
+        logger.info(f"停止翻译会话 {session_id}")
         cancellation_event_map[session_id].set()
-
 
 def translate_file(
     file_type,
@@ -215,64 +209,60 @@ def translate_file(
     *envs,
 ):
     """
-    This function translates a PDF file from one language to another.
+    将PDF文件从一种语言翻译为另一种语言
 
-    Inputs:
-        - file_type: The type of file to translate
-        - file_input: The file to translate
-        - link_input: The link to the file to translate
-        - service: The translation service to use
-        - lang_from: The language to translate from
-        - lang_to: The language to translate to
-        - page_range: The range of pages to translate
-        - page_input: The input for the page range
-        - prompt: The custom prompt for the llm
-        - threads: The number of threads to use
-        - recaptcha_response: The reCAPTCHA response
-        - state: The state of the translation process
-        - progress: The progress bar
-        - envs: The environment variables
+    输入:
+        - file_type: 文件类型
+        - file_input: 输入文件
+        - link_input: 文件链接
+        - service: 翻译服务
+        - lang_from: 源语言
+        - lang_to: 目标语言
+        - page_range: 页面范围
+        - page_input: 自定义页面范围输入
+        - prompt: LLM自定义提示
+        - threads: 线程数
+        - recaptcha_response: reCAPTCHA响应
+        - state: 翻译状态
+        - progress: 进度条
+        - envs: 环境变量
 
-    Returns:
-        - The translated file
-        - The translated file
-        - The translated file
-        - The progress bar
-        - The progress bar
-        - The progress bar
+    返回:
+        - 翻译后的文件
+        - 翻译进度
     """
     session_id = uuid.uuid4()
     state["session_id"] = session_id
     cancellation_event_map[session_id] = asyncio.Event()
-    # Translate PDF content using selected service.
+    
     if flag_demo and not verify_recaptcha(recaptcha_response):
-        raise gr.Error("reCAPTCHA fail")
+        raise gr.Error("reCAPTCHA验证失败")
 
-    progress(0, desc="Starting translation...")
+    progress(0, desc="开始翻译...")
 
     output = Path("pdf2zh_files")
     output.mkdir(parents=True, exist_ok=True)
 
-    if file_type == "File":
+    if file_type == "文件":
         if not file_input:
-            raise gr.Error("No input")
+            raise gr.Error("无输入文件")
         file_path = shutil.copy(file_input, output)
     else:
         if not link_input:
-            raise gr.Error("No input")
+            raise gr.Error("无输入链接")
         file_path = download_with_limit(
             link_input,
             output,
-            5 * 1024 * 1024 if flag_demo else None,
+            10 * 1024 * 1024 if flag_demo else None,
         )
 
     filename = os.path.splitext(os.path.basename(file_path))[0]
     file_raw = output / f"{filename}.pdf"
-    file_mono = output / f"{filename}-mono.pdf"
-    file_dual = output / f"{filename}-dual.pdf"
+    file_mono = output / f"{filename}-译文.pdf"
+    file_dual = output / f"{filename}-双语.pdf"
 
     translator = service_map[service]
-    if page_range != "Others":
+    if page_range != "自定义":
         selected_page = page_map[page_range]
     else:
         selected_page = []
@@ -290,18 +280,18 @@ def translate_file(
         _envs[env[0]] = envs[i]
     for k, v in _envs.items():
         if str(k).upper().endswith("API_KEY") and str(v) == "***":
-            # Load Real API_KEYs from local configure file
+            # 从本地配置文件加载真实API_KEY
             real_keys: str = ConfigManager.get_env_by_translatername(
                 translator, k, None
             )
             _envs[k] = real_keys
 
-    print(f"Files before translation: {os.listdir(output)}")
+    print(f"翻译前文件: {os.listdir(output)}")
 
     def progress_bar(t: tqdm.tqdm):
-        desc = getattr(t, "desc", "Translating...")
+        desc = getattr(t, "desc", "翻译中...")
         if desc == "":
-            desc = "Translating..."
+            desc = "翻译中..."
         progress(t.n / t.total, desc=desc)
 
     try:
@@ -332,13 +322,13 @@ def translate_file(
         translate(**param)
     except CancelledError:
         del cancellation_event_map[session_id]
-        raise gr.Error("Translation cancelled")
-    print(f"Files after translation: {os.listdir(output)}")
+        raise gr.Error("翻译已取消")
+    print(f"翻译后文件: {os.listdir(output)}")
 
     if not file_mono.exists() or not file_dual.exists():
-        raise gr.Error("No output")
+        raise gr.Error("无输出文件")
 
-    progress(1.0, desc="Translation complete!")
+    progress(1.0, desc="翻译完成!")
 
     return (
         str(file_mono),
@@ -348,7 +338,6 @@ def translate_file(
         gr.update(visible=True),
         gr.update(visible=True),
     )
-
 
 def babeldoc_translate_file(**kwargs):
     from babeldoc.high_level import init as babeldoc_init
@@ -427,7 +416,7 @@ def babeldoc_translate_file(**kwargs):
             )
             break
     else:
-        raise ValueError("Unsupported translation service")
+        raise ValueError("不支持的翻译服务")
     import asyncio
     from babeldoc.main import create_progress_handler
 
@@ -455,7 +444,6 @@ def babeldoc_translate_file(**kwargs):
         async def yadt_translate_coro(yadt_config):
             progress_context, progress_handler = create_progress_handler(yadt_config)
 
-            # 开始翻译
             with progress_context:
                 async for event in babeldoc_translate(yadt_config):
                     progress_handler(event)
@@ -467,11 +455,11 @@ def babeldoc_translate_file(**kwargs):
                         raise CancelledError
                     if event["type"] == "finish":
                         result = event["translate_result"]
-                        logger.info("Translation Result:")
-                        logger.info(f"  Original PDF: {result.original_pdf_path}")
-                        logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
-                        logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
-                        logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+                        logger.info("翻译结果:")
+                        logger.info(f"  原始PDF: {result.original_pdf_path}")
+                        logger.info(f"  耗时: {result.total_seconds:.2f}秒")
+                        logger.info(f"  单语PDF: {result.mono_pdf_path or '无'}")
+                        logger.info(f"  双语PDF: {result.dual_pdf_path or '无'}")
                         file_mono = result.mono_pdf_path
                         file_dual = result.dual_pdf_path
                         break
@@ -489,15 +477,14 @@ def babeldoc_translate_file(**kwargs):
 
         return asyncio.run(yadt_translate_coro(yadt_config))
 
-
-# Global setup
+# 全局设置
 custom_blue = gr.themes.Color(
     c50="#E8F3FF",
     c100="#BEDAFF",
     c200="#94BFFF",
     c300="#6AA1FF",
     c400="#4080FF",
-    c500="#165DFF",  # Primary color
+    c500="#165DFF",  # 主色
     c600="#0E42D2",
     c700="#0A2BA6",
     c800="#061D79",
@@ -511,7 +498,7 @@ custom_css = """
     .env-warning {color: #dd5500 !important;}
     .env-success {color: #559900 !important;}
 
-    /* Add dashed border to input-file class */
+    /* 添加虚线边框 */
     .input-file {
         border: 1.2px dashed #165DFF !important;
         border-radius: 6px !important;
@@ -541,55 +528,42 @@ demo_recaptcha = """
     </script>
     """
 
-from babeldoc import __version__ as babeldoc_version
 
-tech_details_string = f"""
-                    <summary>Technical details</summary>
-                    - GitHub: <a href="https://github.com/Byaidu/PDFMathTranslate">Byaidu/PDFMathTranslate</a><br>
-                    - BabelDOC: <a href="https://github.com/funstory-ai/BabelDOC">funstory-ai/BabelDOC</a><br>
-                    - GUI by: <a href="https://github.com/reycn">Rongxin</a><br>
-                    - pdf2zh Version: {__version__} <br>
-                    - BabelDOC Version: {babeldoc_version}
-                """
 cancellation_event_map = {}
 
-
-# The following code creates the GUI
+# 创建GUI界面
 with gr.Blocks(
-    title="PDFMathTranslate - PDF Translation with preserved formats",
+    title="PDFMathTranslate - 保留格式的PDF翻译工具",
     theme=gr.themes.Default(
         primary_hue=custom_blue, spacing_size="md", radius_size="lg"
     ),
     css=custom_css,
     head=demo_recaptcha if flag_demo else "",
 ) as demo:
-    gr.Markdown(
-        "# [PDFMathTranslate @ GitHub](https://github.com/Byaidu/PDFMathTranslate)"
-    )
 
     with gr.Row():
         with gr.Column(scale=1):
-            gr.Markdown("## File | < 5 MB" if flag_demo else "## File")
+            gr.Markdown("## 文件 | < 5 MB" if flag_demo else "## 文件")
             file_type = gr.Radio(
-                choices=["File", "Link"],
-                label="Type",
-                value="File",
+                choices=["文件", "链接"],
+                label="类型",
+                value="文件",
             )
             file_input = gr.File(
-                label="File",
+                label="文件",
                 file_count="single",
                 file_types=[".pdf"],
                 type="filepath",
                 elem_classes=["input-file"],
             )
             link_input = gr.Textbox(
-                label="Link",
+                label="链接",
                 visible=False,
                 interactive=True,
             )
-            gr.Markdown("## Option")
+            gr.Markdown("## 选项")
             service = gr.Dropdown(
-                label="Service",
+                label="翻译服务",
                 choices=enabled_services,
                 value=enabled_services[0],
             )
@@ -603,43 +577,43 @@ with gr.Blocks(
                 )
             with gr.Row():
                 lang_from = gr.Dropdown(
-                    label="Translate from",
+                    label="源语言",
                     choices=lang_map.keys(),
-                    value=ConfigManager.get("PDF2ZH_LANG_FROM", "English"),
+                    value=ConfigManager.get("PDF2ZH_LANG_FROM", "英文"),
                 )
                 lang_to = gr.Dropdown(
-                    label="Translate to",
+                    label="目标语言",
                     choices=lang_map.keys(),
-                    value=ConfigManager.get("PDF2ZH_LANG_TO", "Simplified Chinese"),
+                    value=ConfigManager.get("PDF2ZH_LANG_TO", "简体中文"),
                 )
             page_range = gr.Radio(
                 choices=page_map.keys(),
-                label="Pages",
+                label="页面范围",
                 value=list(page_map.keys())[0],
             )
 
             page_input = gr.Textbox(
-                label="Page range",
+                label="自定义页面范围",
                 visible=False,
                 interactive=True,
             )
 
-            with gr.Accordion("Open for More Experimental Options!", open=False):
-                gr.Markdown("#### Experimental")
+            with gr.Accordion("更多实验性选项", open=False):
+                gr.Markdown("#### 实验性功能")
                 threads = gr.Textbox(
-                    label="number of threads", interactive=True, value="4"
+                    label="线程数", interactive=True, value="4"
                 )
                 skip_subset_fonts = gr.Checkbox(
-                    label="Skip font subsetting", interactive=True, value=False
+                    label="跳过字体子集化", interactive=True, value=False
                 )
                 ignore_cache = gr.Checkbox(
-                    label="Ignore cache", interactive=True, value=False
+                    label="忽略缓存", interactive=True, value=False
                 )
                 prompt = gr.Textbox(
-                    label="Custom Prompt for llm", interactive=True, visible=False
+                    label="LLM自定义提示", interactive=True, visible=False
                 )
                 use_babeldoc = gr.Checkbox(
-                    label="Use BabelDOC", interactive=True, value=False
+                    label="使用BabelDOC", interactive=True, value=False
                 )
                 envs.append(prompt)
 
@@ -661,9 +635,9 @@ with gr.Blocks(
                             and hidden_gradio_details
                         ):
                             visible = False
-                        # Hidden Keys From Gradio
+                        # 隐藏API密钥
                         if "API_KEY" in label.upper():
-                            value = "***"  # We use "***" Present Real API_KEY
+                            value = "***"  # 用"***"代替真实API_KEY
                     _envs[i] = gr.update(
                         visible=visible,
                         label=label,
@@ -674,33 +648,29 @@ with gr.Blocks(
 
             def on_select_filetype(file_type):
                 return (
-                    gr.update(visible=file_type == "File"),
-                    gr.update(visible=file_type == "Link"),
+                    gr.update(visible=file_type == "文件"),
+                    gr.update(visible=file_type == "链接"),
                 )
 
             def on_select_page(choice):
-                if choice == "Others":
+                if choice == "自定义":
                     return gr.update(visible=True)
                 else:
                     return gr.update(visible=False)
 
-            output_title = gr.Markdown("## Translated", visible=False)
+            output_title = gr.Markdown("## 翻译结果", visible=False)
             output_file_mono = gr.File(
-                label="Download Translation (Mono)", visible=False
+                label="下载翻译结果(单语)", visible=False
             )
             output_file_dual = gr.File(
-                label="Download Translation (Dual)", visible=False
+                label="下载翻译结果(双语)", visible=False
             )
             recaptcha_response = gr.Textbox(
-                label="reCAPTCHA Response", elem_id="verify", visible=False
+                label="reCAPTCHA响应", elem_id="verify", visible=False
             )
             recaptcha_box = gr.HTML('<div id="recaptcha-box"></div>')
-            translate_btn = gr.Button("Translate", variant="primary")
-            cancellation_btn = gr.Button("Cancel", variant="secondary")
-            tech_details_tog = gr.Markdown(
-                tech_details_string,
-                elem_classes=["secondary-text"],
-            )
+            translate_btn = gr.Button("开始翻译", variant="primary")
+            cancellation_btn = gr.Button("取消翻译", variant="secondary")
             page_range.select(on_select_page, page_range, page_input)
             service.select(
                 on_select_service,
@@ -729,10 +699,10 @@ with gr.Blocks(
             )
 
         with gr.Column(scale=2):
-            gr.Markdown("## Preview")
-            preview = PDF(label="Document Preview", visible=True, height=2000)
+            gr.Markdown("## 预览")
+            preview = PDF(label="文档预览", visible=True, height=2000)
 
-    # Event handlers
+    # 事件处理
     file_input.upload(
         lambda x: x,
         inputs=file_input,
@@ -791,16 +761,15 @@ with gr.Blocks(
         inputs=[state],
     )
 
-
 def parse_user_passwd(file_path: str) -> tuple:
     """
-    Parse the user name and password from the file.
+    从文件解析用户名和密码
 
-    Inputs:
-        - file_path: The file path to read.
-    Outputs:
-        - tuple_list: The list of tuples of user name and password.
-        - content: The content of the file
+    输入:
+        - file_path: 文件路径
+    输出:
+        - tuple_list: 用户名和密码元组列表
+        - content: 文件内容
     """
     tuple_list = []
     content = ""
@@ -811,29 +780,27 @@ def parse_user_passwd(file_path: str) -> tuple:
             with open(file_path[1], "r", encoding="utf-8") as file:
                 content = file.read()
         except FileNotFoundError:
-            print(f"Error: File '{file_path[1]}' not found.")
+            print(f"错误: 文件 '{file_path[1]}' 未找到")
     try:
         with open(file_path[0], "r", encoding="utf-8") as file:
             tuple_list = [
                 tuple(line.strip().split(",")) for line in file if line.strip()
             ]
     except FileNotFoundError:
-        print(f"Error: File '{file_path[0]}' not found.")
+        print(f"错误: 文件 '{file_path[0]}' 未找到")
     return tuple_list, content
-
 
 def setup_gui(
     share: bool = False, auth_file: list = ["", ""], server_port=7860
 ) -> None:
     """
-    Setup the GUI with the given parameters.
+    设置GUI界面
 
-    Inputs:
-        - share: Whether to share the GUI.
-        - auth_file: The file path to read the user name and password.
+    输入:
+        - share: 是否共享
+        - auth_file: 认证文件路径
 
-    Outputs:
-        - None
+    输出: 无
     """
     user_list, html = parse_user_passwd(auth_file)
     if flag_demo:
@@ -850,7 +817,7 @@ def setup_gui(
                 )
             except Exception:
                 print(
-                    "Error launching GUI using 0.0.0.0.\nThis may be caused by global mode of proxy software."
+                    "使用0.0.0.0启动GUI失败\n可能是由于代理软件的全局模式导致"
                 )
                 try:
                     demo.launch(
@@ -862,7 +829,7 @@ def setup_gui(
                     )
                 except Exception:
                     print(
-                        "Error launching GUI using 127.0.0.1.\nThis may be caused by global mode of proxy software."
+                        "使用127.0.0.1启动GUI失败\n可能是由于代理软件的全局模式导致"
                     )
                     demo.launch(
                         debug=True, inbrowser=True, share=True, server_port=server_port
@@ -880,7 +847,7 @@ def setup_gui(
                 )
             except Exception:
                 print(
-                    "Error launching GUI using 0.0.0.0.\nThis may be caused by global mode of proxy software."
+                    "使用0.0.0.0启动GUI失败\n可能是由于代理软件的全局模式导致"
                 )
                 try:
                     demo.launch(
@@ -894,7 +861,7 @@ def setup_gui(
                     )
                 except Exception:
                     print(
-                        "Error launching GUI using 127.0.0.1.\nThis may be caused by global mode of proxy software."
+                        "使用127.0.0.1启动GUI失败\n可能是由于代理软件的全局模式导致"
                     )
                     demo.launch(
                         debug=True,
@@ -905,8 +872,7 @@ def setup_gui(
                         server_port=server_port,
                     )
 
-
-# For auto-reloading while developing
+# 开发时自动重载
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     setup_gui()
