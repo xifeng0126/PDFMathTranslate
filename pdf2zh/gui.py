@@ -458,7 +458,7 @@ def babeldoc_translate_file(**kwargs):
                         logger.info("翻译结果:")
                         logger.info(f"  原始PDF: {result.original_pdf_path}")
                         logger.info(f"  耗时: {result.total_seconds:.2f}秒")
-                        logger.info(f"  单语PDF: {result.mono_pdf_path or '无'}")
+                        logger.info(f"  译文PDF: {result.mono_pdf_path or '无'}")
                         logger.info(f"  双语PDF: {result.dual_pdf_path or '无'}")
                         file_mono = result.mono_pdf_path
                         file_dual = result.dual_pdf_path
@@ -579,12 +579,12 @@ with gr.Blocks(
                 lang_from = gr.Dropdown(
                     label="源语言",
                     choices=lang_map.keys(),
-                    value=ConfigManager.get("PDF2ZH_LANG_FROM", "英文"),
+                    value=ConfigManager.get("PDF2ZH_LANG_FROM", "English"),
                 )
                 lang_to = gr.Dropdown(
                     label="目标语言",
                     choices=lang_map.keys(),
-                    value=ConfigManager.get("PDF2ZH_LANG_TO", "简体中文"),
+                    value=ConfigManager.get("PDF2ZH_LANG_TO", "Simplified Chinese"),
                 )
             page_range = gr.Radio(
                 choices=page_map.keys(),
@@ -593,7 +593,7 @@ with gr.Blocks(
             )
 
             page_input = gr.Textbox(
-                label="自定义页面范围",
+                label="自定义页面范围(eg: 1,3-5,7)",
                 visible=False,
                 interactive=True,
             )
@@ -660,7 +660,7 @@ with gr.Blocks(
 
             output_title = gr.Markdown("## 翻译结果", visible=False)
             output_file_mono = gr.File(
-                label="下载翻译结果(单语)", visible=False
+                label="下载翻译结果(译文)", visible=False
             )
             output_file_dual = gr.File(
                 label="下载翻译结果(双语)", visible=False
